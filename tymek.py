@@ -35,6 +35,14 @@ train = X_train.join(y_train)
 val = X_val.join(y_val)
 
 
+train["Occupation"] = np.where(train["Occupation"] == "_______", "Unknown", train["Occupation"])
+occupations_list = train["Occupation"].unique()
+
+train['Type_of_Loan'].fillna(train.groupby('Customer_ID')['Type_of_Loan'].first(), inplace=True)
+train['Type_of_Loan'].fillna('', inplace=True)
+loan_types_list =  train['Type_of_Loan'].value_counts().head(9).index[1:] 
+
+
 def id_columns(df):
     df = df.drop(["Name", "SSN", "ID"], axis="columns")
     df["Customer_ID"] = df["Customer_ID"].apply(lambda x: int(x[4:], 16)) # convert to int
@@ -59,23 +67,28 @@ def altering(df):
     return df
 
 
-def delete_outliers(column, a, b):
-    column = np.where(a < column, column, float('nan'))
-    return np.where(column <= b, column, float('nan'))
+def delete_outliers(column, a=0, b=0.98, use_quantiles=True):
+    # function helps removing quantiles from a column, 
+    # if parameter use quantiles if False, removes outliners outside given range (a, b)
+    # otherwise removes top quantiles
+    
+    col = np.where(a < column, column, float('nan'))
+    if use_quantiles:
+        return np.where(col <= column.quantile(b), column, float('nan'))
+    return np.where(col <= b, column, float('nan'))
 
 def handle_outliers(df):
     df["Age"] = np.where((0 > df["Age"]), -df["Age"], df["Age"]) # deleting weird outliners
-    df['Age'] = delete_outliers(df["Age"], 0, 100)
+    df['Age'] = delete_outliers(df["Age"], 0, 100, use_quantiles=False)
     
-    df["Annual_Income"] = delete_outliers(df["Annual_Income"], 0, 800000)
-    df["Num_Bank_Accounts"] = delete_outliers(df["Num_Bank_Accounts"], 0, 15)
-    df["Num_Credit_Card"] = delete_outliers(df["Num_Credit_Card"], 0, 15)
-    df["Num_of_Loan"] = delete_outliers(df["Num_of_Loan"], 0, 15)
-    df["Interest_Rate"] = delete_outliers(df["Interest_Rate"], 0, 50)
-    df["Num_Credit_Card"] = delete_outliers(df["Num_Credit_Card"], 0, 15)
-    df["Num_of_Delayed_Payment"] = delete_outliers(df["Num_of_Delayed_Payment"], 0, 50)
-    df["Num_Credit_Inquiries"] = delete_outliers(df["Num_Credit_Inquiries"], 0, 50)
-    df["Total_EMI_per_month"] = delete_outliers(df["Total_EMI_per_month"], 0, 300)
+    df["Annual_Income"] = delete_outliers(df["Annual_Income"])
+    df["Num_Bank_Accounts"] = delete_outliers(df["Num_Bank_Accounts"])
+    df["Num_of_Loan"] = delete_outliers(df["Num_of_Loan"])
+    df["Interest_Rate"] = delete_outliers(df["Interest_Rate"])
+    df["Num_Credit_Card"] = delete_outliers(df["Num_Credit_Card"], 0, 0.97)
+    df["Num_of_Delayed_Payment"] = delete_outliers(df["Num_of_Delayed_Payment"])
+    df["Num_Credit_Inquiries"] = delete_outliers(df["Num_Credit_Inquiries"])
+    df["Total_EMI_per_month"] = delete_outliers(df["Total_EMI_per_month"], 0, 0.95)
     
     
     return df
@@ -122,14 +135,7 @@ def encode_categorical(df):
     
     del df["Payment_Behaviour"]
     
-    
-    # first we fill the information for customers that have other rows with full information available
-    df['Type_of_Loan'].fillna(df.groupby('Customer_ID')['Type_of_Loan'].first(), inplace=True)
-    # later we fill with ''
-    df['Type_of_Loan'].fillna('', inplace=True)
-    
-    types =  df['Type_of_Loan'].value_counts().head(9).index[1:] 
-    for loan_type in types: # the single types of loans
+    for loan_type in loan_types_lists: # the single types of loans
         df[loan_type] = df['Type_of_Loan'].str.contains(loan_type)
     del df["Type_of_Loan"]
     
@@ -138,7 +144,9 @@ def encode_categorical(df):
     df['Credit_History_Age'] = df['Credit_History_Age'].apply(history_age)
     
     # Occupation - ____ for uneployed
-    df["Occupation"] = np.where(df["Occupation"] == "_______", "Unemployed", df["Occupation"])
+    df["Occupation"] = np.where(df["Occupation"] == "_______", "Unknown", df["Occupation"])
+    
+    df["Occupation"] = np.where(df["Occupation"] in occupations_list, df["Occupation"], "Unknown") # to handle different occupations in test data
     
     df = df.join(pd.get_dummies(df['Occupation']))
 
@@ -213,6 +221,39 @@ train_transformed = prepipe.fit_transform(train)
 
 # check outliers - we change the outliers pipe
 described = train_transformed.describe()
+
+
+sns.heatmap(train_transformed.corr(), cmap="YlGnBu")
+
+
+
+# it looks like some columns are strongly corelated:
+    
+# monthly inhand salary is strongly correlated with monthly balance and 
+# amount invested monthly but those are not correlated with each other
+
+train_dropped = train_transformed.drop(columns = ["Monthly_Balance", "Amount_invested_monthly", "Annual_Income"])
+    
+
+train_corr = train_dropped.corr()
+
+t = (abs(train_corr) > 0.5) + 0.
+
+strong_corelation_columns = ["Num_Bank_Accounts", "Num_Credit_Card", "Interest_Rate",
+                             "Num_of_Loan", "Delay_from_due_date", "Num_of_Delayed_Payment",
+                             "Changed_Credit_Limit", "Num_Credit_Inquiries", "Credit_Mix",
+                             "Outstanding_Debt", "Credit_History_Age", 
+                             "Payment_of_Min_Amount"]
+
+
+sns.heatmap(train_dropped[strong_corelation_columns].corr(), annot=True)
+
+
+
+
+
+# MODELS
+
 
 
 
